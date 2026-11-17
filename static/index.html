@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Course FAQ Bot</title>
+  <script>
+    // Set the theme before the page paints (avoids a white flash in dark mode)
+    (function () {
+      let saved = null;
+      try { saved = localStorage.getItem("theme"); } catch (e) {}
+      document.documentElement.dataset.theme = saved || "light";  // default: light
+    })();
+  </script>
+  <style>
+    :root {
+      --bg:#f3f4f6; --card:#ffffff; --text:#111827; --muted:#6b7280; --border:#e5e7eb;
+      --bot:#e5e7eb; --primary:#2563eb; --primary-text:#ffffff; --input:#ffffff;
+      --chip:#eff6ff; --chip-text:#1d4ed8; --chip-border:#bfdbfe; --shadow:rgba(0,0,0,.1);
+      color-scheme: light;
+    }
+    [data-theme="dark"] {
+      --bg:#0f172a; --card:#1e293b; --text:#e5e7eb; --muted:#94a3b8; --border:#334155;
+      --bot:#334155; --primary:#3b82f6; --primary-text:#ffffff; --input:#0f172a;
+      --chip:#1e3a5f; --chip-text:#bfdbfe; --chip-border:#2b4c7e; --shadow:rgba(0,0,0,.5);
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, "Segoe UI", sans-serif; background:var(--bg); color:var(--text);
+           display:flex; justify-content:center; transition: background .2s, color .2s; }
+    #app { width:min(600px, 100%); height:94vh; margin-top:3vh; background:var(--card); border-radius:12px;
+           display:flex; flex-direction:column; box-shadow:0 2px 12px var(--shadow); overflow:hidden; }
+    header { display:flex; align-items:center; justify-content:space-between; padding:14px 16px;
+             border-bottom:1px solid var(--border); }
+    header h2 { margin:0; font-size:20px; }
+    #chat { flex:1; overflow-y:auto; padding:16px; }
+    .msg { max-width:80%; padding:10px 14px; margin:8px 0; border-radius:12px; white-space:pre-wrap; }
+    .user { background:var(--primary); color:var(--primary-text); margin-left:auto; }
+    .bot { background:var(--bot); color:var(--text); }
+    #bar { display:flex; gap:8px; padding:12px; border-top:1px solid var(--border); }
+    #input { flex:1; padding:10px; border:1px solid var(--border); border-radius:8px;
+             background:var(--input); color:var(--text); font-size:15px; }
+    #input::placeholder { color:var(--muted); }
+    button { padding:10px 16px; background:var(--primary); color:var(--primary-text); border:0;
+             border-radius:8px; cursor:pointer; font-size:15px; }
+    button:hover { filter:brightness(1.1); }
+    .icon-btn { display:inline-flex; align-items:center; justify-content:center; padding:8px 10px; }
+    #theme { background:transparent; color:var(--text); border:1px solid var(--border); }
+    #spk.muted { background:#dc2626; }
+    .replay { background:none; border:0; cursor:pointer; padding:0 0 0 8px; color:var(--muted);
+              display:inline-flex; vertical-align:middle; }
+    .replay:hover { color:var(--text); filter:none; }
+
+    /* Suggested question bubbles */
+    #chips { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 4px; }
+    #chips .hint { width:100%; font-size:12px; color:var(--muted); }
+    .chip { background:var(--chip); color:var(--chip-text); border:1px solid var(--chip-border);
+            border-radius:999px; padding:7px 14px; font-size:13.5px; }
+    .chip:hover { filter:brightness(1.08); transform:translateY(-1px); }
+
+    /* Avatar stage */
+    #stage { display:flex; align-items:center; gap:14px; padding:12px 16px; border-bottom:1px solid var(--border); }
+    #avatar { width:88px; height:88px; flex:none; border-radius:50%; overflow:hidden;
+              background:var(--chip); border:2px solid var(--chip-border); }
+    #avatar svg { width:100%; height:100%; display:block; }
+    #stage-text { display:flex; flex-direction:column; gap:2px; }
+    #stage-text strong { font-size:15px; }
+    #status { font-size:13px; color:var(--muted); }
+    #avatar.speaking { animation: glow 1s ease-in-out infinite; }
+    #avatar.thinking svg { animation: bob .9s ease-in-out infinite; }
+    @keyframes glow { 0%,100% { box-shadow:0 0 0 0 rgba(37,99,235,.5); } 50% { box-shadow:0 0 0 10px rgba(37,99,235,0); } }
+    @keyframes bob { 50% { transform:translateY(-3px); } }
+    .eye { transform-box:fill-box; transform-origin:center; animation:blink 4s infinite; }
+    @keyframes blink { 0%,94%,100% { transform:scaleY(1); } 97% { transform:scaleY(.1); } }
+    #avatar .smile { opacity:1; }
+    #avatar .mouth { opacity:0; }
+    #avatar.speaking .smile { opacity:0; }
+    #avatar.speaking .mouth { opacity:1; }
+
+    /* Sources under bot replies */
+    .sources { margin-top:8px; padding-top:6px; border-top:1px solid var(--border); font-size:12px; color:var(--muted); }
+    .src { display:inline-block; margin:2px 4px 2px 0; padding:2px 8px; border-radius:999px;
+           background:var(--chip); color:var(--chip-text); border:1px solid var(--chip-border); }
+    .method { margin-top:2px; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h2>🎓 Course FAQ Bot</h2>
+    <button id="theme" class="icon-btn" onclick="toggleTheme()" title="Switch light/dark mode"></button>
+  </header>
+  <div id="stage">
+    <div id="avatar" class="idle">
+      <svg viewBox="0 0 120 120" aria-label="Blue and white robot course assistant">
+  <defs>
+    <linearGradient id="botShell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#dbeafe"/>
+    </linearGradient>
+    <linearGradient id="botScreen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e40af"/>
+      <stop offset="100%" stop-color="#172554"/>
+    </linearGradient>
+    <linearGradient id="botLaptop" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#475569"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Antenna -->
+  <path d="M60 17 V10" stroke="#1e3a8a" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="60" cy="8" r="5" fill="#bfdbfe" stroke="#1e3a8a" stroke-width="3"/>
+
+  <!-- Side ear pieces -->
+  <rect x="17" y="42" width="14" height="29" rx="7"
+        fill="#60a5fa" stroke="#1e40af" stroke-width="2"/>
+  <rect x="89" y="42" width="14" height="29" rx="7"
+        fill="#60a5fa" stroke="#1e40af" stroke-width="2"/>
+
+  <!-- Robot head casing -->
+  <rect x="25" y="20" width="70" height="65" rx="25"
+        fill="url(#botShell)" stroke="#1e40af" stroke-width="3"/>
+
+  <!-- Inner face screen -->
+  <rect x="32" y="28" width="56" height="48" rx="19"
+        fill="url(#botScreen)" stroke="#172554" stroke-width="1.5"/>
+
+  <!-- Eye highlights -->
+  <ellipse class="eye" cx="47" cy="50" rx="4.5" ry="6"
+           fill="#bae6fd"/>
+  <ellipse class="eye" cx="73" cy="50" rx="4.5" ry="6"
+           fill="#bae6fd"/>
+
+  <!-- Smiling expression -->
+  <path class="smile" d="M49 62 Q60 72 71 62"
+        fill="none" stroke="#7dd3fc" stroke-width="3"
+        stroke-linecap="round"/>
+  <ellipse class="mouth" id="mouth" cx="60" cy="64"
+           rx="7" ry="2" fill="#7dd3fc"/>
+
+  <!-- Small body -->
+  <path d="M38 83 Q60 91 82 83 L87 112
+           Q60 120 33 112 Z"
+        fill="url(#botShell)" stroke="#1e40af" stroke-width="2.5"/>
+
+  <!-- Left arm -->
+  <path d="M35 91 Q20 89 17 105 Q15 116 27 117"
+        fill="none" stroke="#1e40af" stroke-width="8"
+        stroke-linecap="round"/>
+  <path d="M35 91 Q20 89 17 105 Q15 116 27 117"
+        fill="none" stroke="#dbeafe" stroke-width="5"
+        stroke-linecap="round"/>
+
+  <!-- Laptop -->
+  <path d="M48 87 L101 87 L94 115 L41 115 Z"
+        fill="url(#botLaptop)" stroke="#172554" stroke-width="2.5"
+        stroke-linejoin="round"/>
+  <path d="M38 115 L99 115 L95 119 L35 119 Z"
+        fill="#172554"/>
+  <circle cx="69" cy="101" r="3.5" fill="#93c5fd"/>
+        </svg>
+    </div>
+    <div id="stage-text"><strong>Course Assistant</strong><span id="status">Ready</span></div>
+  </div>
+  <div id="chat"></div>
+  <div id="bar">
+    <input id="input" placeholder="Ask about a course, e.g. What is COMP4001?" />
+    <button onclick="send()">Send</button>
+    <button id="spk" class="icon-btn" onclick="toggleSpeak()" title="Auto-read replies aloud"></button>
+  </div>
+</div>
+
+<script>
+const chat = document.getElementById("chat");
+const input = document.getElementById("input");
+let history = [];
+let speakOn = true, currentAudio = null;
+
+/* ---------- Icons ---------- */
+const svg = (inner) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const SPK = '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>';
+const ICON_ON  = svg(SPK + '<path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/>');
+const ICON_OFF = svg(SPK + '<line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/>');
+const ICON_SUN = svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>');
+const ICON_MOON = svg('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>');
+
+/* ---------- Light / dark mode ---------- */
+function applyThemeIcon() {
+  const dark = document.documentElement.dataset.theme === "dark";
+  document.getElementById("theme").innerHTML = dark ? ICON_SUN : ICON_MOON;  // show what you'll switch TO
+}
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch (e) {}
+  applyThemeIcon();
+}
+
+/* ---------- Suggested questions ---------- */
+const START_SUGGESTIONS = [
+  "What is COMP4001?",
+  "What is HCI about?",
+  "Which course covers artificial intelligence?",
+  "How many credits is the Internship?"
+];
+const FOLLOWUP_SUGGESTIONS = [
+  "What are its prerequisites?",
+  "How is it assessed?",
+  "How many credits is it?"
+];
+
+function renderChips(list, hint) {
+  const old = document.getElementById("chips");
+  if (old) old.remove();
+  const box = document.createElement("div");
+  box.id = "chips";
+  if (hint) {
+    const h = document.createElement("div");
+    h.className = "hint";
+    h.textContent = hint;
+    box.appendChild(h);
+  }
+  list.forEach(q => {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.textContent = q;
+    b.onclick = () => { input.value = q; send(); };
+    box.appendChild(b);
+  });
+  chat.appendChild(box);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+/* ---------- Chat ---------- */
+input.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+
+function addMsg(text, who) {
+  const div = document.createElement("div");
+  div.className = "msg " + who;
+  const span = document.createElement("span");
+  span.textContent = text;
+  div.appendChild(span);
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+function addSources(div, sources, method) {
+  if (!method && !(sources && sources.length)) return;
+  const box = document.createElement("div");
+  box.className = "sources";
+  if (sources && sources.length) {
+    const label = document.createElement("span");
+    label.textContent = "Sources: ";
+    box.appendChild(label);
+    sources.forEach(src => {
+      const tag = document.createElement("span");
+      tag.className = "src";
+      tag.textContent = src.code + (src.name ? " · " + src.name : "");
+      box.appendChild(tag);
+    });
+  }
+  if (method) {
+    const m = document.createElement("div");
+    m.className = "method";
+    m.textContent = "Retrieval: " + method;
+    box.appendChild(m);
+  }
+  div.appendChild(box);
+}
+
+function setBotText(div, text, withReplay = true, sources = [], method = "") {
+  div.querySelector("span").textContent = text;
+  if (withReplay) {
+    const btn = document.createElement("button");
+    btn.className = "replay";
+    btn.innerHTML = ICON_ON;
+    btn.title = "Read aloud";
+    btn.onclick = () => speak(text);
+    div.appendChild(btn);
+  }
+  addSources(div, sources, method);
+}
+
+async function send() {
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  stopSpeaking();
+  const old = document.getElementById("chips");
+  if (old) old.remove();
+  addMsg(text, "user");
+  const loading = addMsg("Thinking...", "bot");
+  setAvatarState("thinking");
+
+  try {
+    const res = await fetch("/chat", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({message: text, history})
+    });
+    const data = await res.json();
+    setBotText(loading, data.reply, true, data.sources || [], data.method || "");
+    history.push({role: "user", content: text}, {role: "assistant", content: data.reply});
+    if (speakOn) speak(data.reply);
+    else setAvatarState("idle");
+  } catch (e) {
+    setBotText(loading, "Sorry, I couldn't reach the server.", false);
+    setAvatarState("idle");
+  }
+  renderChips(FOLLOWUP_SUGGESTIONS, "You could also ask:");
+}
+
+/* ---------- Avatar ---------- */
+const STATUS_TEXT = {idle: "Ready", thinking: "Thinking…", speaking: "Speaking…"};
+
+function setAvatarState(state, label) {
+  document.getElementById("avatar").className = state;
+  document.getElementById("status").textContent = label || STATUS_TEXT[state];
+}
+
+let smooth = 0;
+function setMouth(level) {
+  smooth = smooth * 0.5 + level * 0.5;               // smooth out jitter
+  document.getElementById("mouth").setAttribute("ry", (2 + smooth * 11).toFixed(1));
+}
+
+// Lip-sync: the mouth opens according to the loudness of the audio being played
+function animateMouth(analyser) {
+  const data = analyser ? new Uint8Array(analyser.fftSize) : null;
+  const loop = (t) => {
+    let level;
+    if (analyser) {
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (const v of data) { const x = (v - 128) / 128; sum += x * x; }
+      level = Math.min(1, Math.sqrt(sum / data.length) * 4);
+    } else {
+      level = 0.25 + 0.45 * Math.abs(Math.sin(t / 110));   // fallback animation
+    }
+    setMouth(level);
+    rafId = requestAnimationFrame(loop);
+  };
+  rafId = requestAnimationFrame(loop);
+}
+
+/* ---------- Read aloud ---------- */
+let audioCtx = null, rafId = null, speakId = 0;
+
+function stopSpeaking() {
+  speakId++;                                          // cancels any request still in flight
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  cancelAnimationFrame(rafId);
+  smooth = 0;
+  setMouth(0);
+  setAvatarState("idle");
+}
+
+async function speak(text) {
+  stopSpeaking();
+  const myId = speakId;
+  setAvatarState("thinking", "Preparing voice…");
+  try {
+    const res = await fetch("/tts", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({text})
+    });
+    if (myId !== speakId) return;
+    if (!res.ok) { setAvatarState("idle"); return; }
+    const blob = await res.blob();
+    if (myId !== speakId) return;
+
+    const audio = new Audio(URL.createObjectURL(blob));
+    currentAudio = audio;
+    audio.onended = () => { if (currentAudio === audio) stopSpeaking(); };
+
+    let analyser = null;
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      await audioCtx.resume();
+      const src = audioCtx.createMediaElementSource(audio);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      src.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    } catch (e) { analyser = null; }
+
+    await audio.play();
+    if (myId !== speakId) return;
+    setAvatarState("speaking");
+    animateMouth(analyser);
+  } catch (e) {
+    console.error(e);
+    setAvatarState("idle");
+  }
+}
+
+function toggleSpeak() {
+  speakOn = !speakOn;
+  const spk = document.getElementById("spk");
+  spk.innerHTML = speakOn ? ICON_ON : ICON_OFF;
+  spk.classList.toggle("muted", !speakOn);
+  if (!speakOn) stopSpeaking();
+}
+
+/* ---------- Init ---------- */
+document.getElementById("spk").innerHTML = ICON_ON;
+applyThemeIcon();
+addMsg("Hi! Ask me about any course code, name or description.", "bot");
+renderChips(START_SUGGESTIONS, "Try asking:");
+</script>
+</body>
+</html>
