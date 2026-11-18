@@ -1,6 +1,6 @@
 # Course FAQ Chatbot
 
-COMP4431 Artificial Intelligence (2026/27) — Group Project: *Domain-specific Chatbot Development*
+COMP4431 Artificial Intelligence (2026/27) — Group 11, The Hong Kong Polytechnic University, November 2026, Project: *Domain-specific Chatbot Development*
 
 A chatbot that answers questions about university courses (course code, name, description, credits, prerequisites, assessment). It uses Retrieval-Augmented Generation (RAG): relevant course records are retrieved first, then an LLM (DeepSeek via OpenRouter) writes an answer grounded only in those records.
 
