@@ -4,7 +4,7 @@ import chromadb
 from chromadb.utils import embedding_functions
 from openai import OpenAI
 from dotenv import load_dotenv
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process
 
 load_dotenv()
 
@@ -12,6 +12,15 @@ load_dotenv()
 # ---- 1. Load data and build vector DB (runs once at startup) ----
 df = pd.read_csv("data/courses.csv").fillna("None")
 df["code"] = df["code"].str.upper().str.strip()
+
+def format_credits(v) -> str:
+    v = str(v).strip()
+    if re.fullmatch(r"\d+(\.0+)?", v):          # "3", "3.0" -> "3 credits"
+        n = int(float(v))
+        return f"{n} credit" + ("" if n == 1 else "s")
+    return v                                     # "12 Training Credits" stays as it is
+
+df["credits"] = df["credits"].map(format_credits)
 
 # ---- Acronyms and aliases ----
 STOPWORDS = {"and", "of", "the", "for", "to", "in", "a"}
@@ -149,22 +158,32 @@ def retrieve(question: str, history: list[dict] | None = None, k: int = 3):
     if valid:                                   # 1. exact course code
         r = collection.get(ids=valid)
         return _items(r["ids"], r["documents"]), "Exact course code"
-    if codes:                                   # code asked for, but not in the data
-        return [], "No matching course code"
+    if codes:                                   # code asked for, but not in the data:
+        similar = process.extract(codes[0], list(name_of), scorer=fuzz.ratio, limit=3)
+        ids = [code for code, _score, _idx in similar]      # ...offer the courses with the closest codes
+        r = collection.get(ids=ids)
+        return _items(r["ids"], r["documents"]), "No matching course code"
 
     matched = find_courses(question)            # 2. acronym / fuzzy name
     if matched:
         r = collection.get(ids=matched)
         return _items(r["ids"], r["documents"]), "Acronym / fuzzy name match"
 
-    if history and is_followup(question):   # 3. follow-up
-        ids = codes_from_history(history)
+    if is_followup(question):                   # 3. follow-up ("How many credits is it?")
+        ids = codes_from_history(history or [])
         if ids:
             r = collection.get(ids=ids)
             return _items(r["ids"], r["documents"]), "Previous conversation (follow-up)"
+        return [], "Unclear follow-up"          # "it" refers to nothing we know
 
     r = collection.query(query_texts=[question], n_results=k)   # 4. semantic search
     return _items(r["ids"][0], r["documents"][0]), "Semantic search"
+
+
+def clarify_reply(question: str) -> str:
+    if re.search(r"[\u4e00-\u9fff]", question):
+        return "請問你指的是哪一個課程？請告訴我課程編號或名稱，例如 COMP4001。"
+    return "Which course do you mean? Please tell me a course code or name, for example COMP4001."
 
 # ---- 3. LLM via OpenRouter (OpenAI-compatible API) ----
 llm = OpenAI(
@@ -176,8 +195,9 @@ MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat")
 SYSTEM_PROMPT = """You are a friendly course FAQ assistant for university courses.
 Rules:
 1. Answer ONLY using the course information in the provided context.
-2. If the answer is not in the context, say you don't have that information
-   , suggest checking the official course page "https://www.polyu.edu.hk/internalsearch" and provide reference courses.
+2. If the context does not contain the answer at all, reply with exactly: NO_INFO
+   (nothing else). If it contains only part of the answer, answer that part and
+   say which part is missing.
 3. LANGUAGE: Reply in English by default. Only reply in Chinese if the user's
    question is written in Chinese. Never use any other language.
 4. Be concise.
@@ -205,15 +225,51 @@ def list_all_courses(question: str) -> str:
     tail = "你可以問我任何一個課程的詳情。" if zh else "Ask me about any of them for details."
     return head + "\n\n" + "\n".join(rows) + "\n\n" + tail
 
+OFFICIAL_URL = "https://www.polyu.edu.hk/internalsearch"
+
+# Detects a reply that starts by saying "I have no information" (backup for NO_INFO)
+NO_INFO_START = re.compile(
+    r"^\W*(sorry\W+|抱歉\W*)?(i\s+)?((don't|do not|cannot|can't|couldn't)\s+(have|find|provide)\b[^.]{0,40}information"
+    r"|have no information)"
+    r"|^\W*(抱歉\W*)?(我)?(沒有|没有).{0,8}(資料|资料|資訊|信息)",
+    re.IGNORECASE,
+)
+
+def is_no_info(reply: str) -> bool:
+    r = reply.strip()
+    return r.upper().startswith("NO_INFO") or (len(r) <= 200 and bool(NO_INFO_START.search(r)))
+
+def no_info_reply(question: str, items: list[dict], missing_code: str = "") -> str:
+    """Fixed-format 'cannot answer' reply, so references and link are always shown."""
+    zh = re.search(r"[\u4e00-\u9fff]", question)
+    if missing_code:
+        first = f"資料庫中沒有課程 {missing_code}。" if zh else f"I couldn't find course {missing_code} in the database."
+    else:
+        first = "我沒有這方面的資料。" if zh else "I don't have information about that."
+    lines = [first]
+    if items:
+        lines.append("")
+        lines.append("以下是我可以提供資料的部分課程：" if zh else "For reference, here are some courses I can provide information about:")
+        lines += [f"- {i['code']} {i['name']}" for i in items]
+    lines.append("")
+    lines.append(f"你也可以查看官方課程網頁：{OFFICIAL_URL}" if zh else f"You can also check the official course page: {OFFICIAL_URL}")
+    return "\n".join(lines)
+
 def answer(question: str, history: list[dict]):
-    items, method = retrieve(question, history)
     if LIST_ALL.search(question):
         return list_all_courses(question), [], "Full course list"
-    if items:
-        context = "\n".join(i["text"] for i in items)
-    else:
-        context = "The course code the user asked about does not exist in the database."
 
+    items, method = retrieve(question, history)
+    sources = [{"code": i["code"], "name": i["name"]} for i in items]
+
+    if method == "Unclear follow-up":
+        return clarify_reply(question), [], method
+
+    if method == "No matching course code":      # asked for a code that does not exist
+        missing = CODE_PATTERN.findall(question)[0].replace(" ", "").upper()
+        return no_info_reply(question, items, missing), sources, method
+
+    context = "\n".join(i["text"] for i in items)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages += history[-6:]
     messages.append({
@@ -225,5 +281,7 @@ def answer(question: str, history: list[dict]):
         ),
     })
     resp = llm.chat.completions.create(model=MODEL, messages=messages, temperature=0.2)
-    sources = [{"code": i["code"], "name": i["name"]} for i in items]
-    return resp.choices[0].message.content, sources, method
+    reply = resp.choices[0].message.content.strip()
+    if is_no_info(reply):
+        reply = no_info_reply(question, items)
+    return reply, sources, method
