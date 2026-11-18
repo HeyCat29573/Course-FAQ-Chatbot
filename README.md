@@ -58,10 +58,8 @@ course-bot/
 ├── app.py              # FastAPI server: /chat, /tts and the web page
 ├── rag.py              # Retrieval (exact / fuzzy / semantic), system prompt, LLM call
 ├── voice.py            # Text-to-speech (edge-tts)
-├── build_csv.py        # Converts subject description PDFs into data/courses.csv
 ├── data/
 │   └── courses.csv     # Knowledge base
-├── subject_pdfs/       # Source PDFs for the knowledge base
 ├── static/
 │   └── index.html      # Chat interface (avatar, dark mode, suggestions)
 ├── requirements.txt
