@@ -92,6 +92,14 @@
     .text a { color:var(--chip-text); word-break:break-all; }
     .text code { background:var(--border); padding:1px 5px; border-radius:4px; font-size:.92em; }
     .msg.bot .replay { margin-top:4px; padding-left:0; }
+
+    /* Tables in bot replies */
+    .msg.bot.wide { max-width:96%; }
+    .table-wrap { overflow-x:auto; margin:6px 0; }
+    .text table { border-collapse:collapse; font-size:13.5px; width:100%; }
+    .text th, .text td { border:1px solid var(--border); padding:6px 10px; text-align:left; vertical-align:top; }
+    .text th { background:var(--chip); color:var(--chip-text); white-space:nowrap; }
+    .bot .text td, .bot .text th { background-clip:padding-box; }
   </style>
 </head>
 <body>
@@ -309,17 +317,64 @@ function renderInline(parent, text) {
   if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
 }
 
+/* Markdown tables: "| a | b |" rows with a "|---|---|" separator under the header */
+function splitRow(line) {
+  let t = line.trim();
+  if (t.startsWith("|")) t = t.slice(1);
+  if (t.endsWith("|")) t = t.slice(0, -1);
+  return t.split("|").map(c => c.trim().replace(/<br\s*\/?>/gi, "; "));
+}
+const isTableSep = (l) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l) && l.includes("-");
+
+function buildTable(headerLine, rowLines) {
+  const wrap = document.createElement("div");
+  wrap.className = "table-wrap";
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  splitRow(headerLine).forEach(c => {
+    const th = document.createElement("th");
+    renderInline(th, c);
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rowLines.forEach(r => {
+    const tr = document.createElement("tr");
+    splitRow(r).forEach(c => {
+      const td = document.createElement("td");
+      renderInline(td, c);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  return wrap;
+}
+
 function renderMarkdown(container, text) {
   container.textContent = "";
-  text.split("\n").forEach(raw => {
-    const line = raw.replace(/\s+$/, "");
+  const lines = text.split("\n").map(l => l.replace(/\s+$/, ""));
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (!line.trim()) {                                          // blank line = small gap
       if (container.lastChild && container.lastChild.className !== "gap") {
         const gap = document.createElement("div");
         gap.className = "gap";
         container.appendChild(gap);
       }
-      return;
+      continue;
+    }
+    // table: a line with "|" followed by a separator line
+    if (line.includes("|") && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+      const rows = [];
+      let j = i + 2;
+      while (j < lines.length && lines[j].trim() && lines[j].includes("|")) { rows.push(lines[j]); j++; }
+      container.appendChild(buildTable(line, rows));
+      i = j - 1;
+      continue;
     }
     const row = document.createElement("div");
     const li = line.match(/^(\s*)([-*•]|\d+[.)])\s+(.*)$/);      // "- item", "* item", "1. item"
@@ -344,17 +399,22 @@ function renderMarkdown(container, text) {
       renderInline(row, line.trim());
     }
     container.appendChild(row);
-  });
+  }
 }
+
+const LIST_METHOD = "Full course list";
+// A full course table is long to listen to, so only its first sentence is read aloud
+const spokenText = (text, method) => method === LIST_METHOD ? text.split("\n")[0] : text;
 
 function setBotText(div, text, withReplay = true, sources = [], method = "") {
   renderMarkdown(div.querySelector(".text"), text);
+  if (div.querySelector(".table-wrap")) div.classList.add("wide");
   if (withReplay) {
     const btn = document.createElement("button");
     btn.className = "replay";
     btn.innerHTML = ICON_ON;
     btn.title = "Read aloud";
-    btn.onclick = () => speak(text);
+    btn.onclick = () => speak(spokenText(text, method));
     div.appendChild(btn);
   }
   addSources(div, sources, method);
@@ -370,6 +430,7 @@ async function send() {
   addMsg(text, "user");
   const loading = addMsg("Thinking...", "bot");
   setAvatarState("thinking");
+  let method = "";
 
   try {
     const res = await fetch("/chat", {
@@ -378,15 +439,17 @@ async function send() {
       body: JSON.stringify({message: text, history})
     });
     const data = await res.json();
-    setBotText(loading, data.reply, true, data.sources || [], data.method || "");
+    method = data.method || "";
+    setBotText(loading, data.reply, true, data.sources || [], method);
     history.push({role: "user", content: text}, {role: "assistant", content: data.reply});
-    if (speakOn) speak(data.reply);
+    if (speakOn) speak(spokenText(data.reply, method));
     else setAvatarState("idle");
   } catch (e) {
     setBotText(loading, "Sorry, I couldn't reach the server.", false);
     setAvatarState("idle");
   }
-  renderChips(FOLLOWUP_SUGGESTIONS, "You could also ask:");
+  if (method === LIST_METHOD) renderChips(START_SUGGESTIONS, "Try asking:");   // follow-ups make no sense after a full list
+  else renderChips(FOLLOWUP_SUGGESTIONS, "You could also ask:");
 }
 
 /* ---------- Avatar ---------- */
