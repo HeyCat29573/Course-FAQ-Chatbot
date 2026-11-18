@@ -88,11 +88,35 @@ name_of = dict(zip(df["code"], df["name"]))
 def _items(ids, docs):
     return [{"code": i, "name": name_of.get(i, ""), "text": d} for i, d in zip(ids, docs)]
 
-# Words that signal a follow-up about the course discussed earlier
-FOLLOWUP_PATTERN = re.compile(
-    r"\b(it|its|this|that|they|them|their|those|these|the course|the same one)\b|它|這|这|該|该|呢",
+# Pronouns that point back to the course discussed earlier (English + Chinese)
+PRONOUNS = re.compile(
+    r"\b(it|its|this|that|they|them|their|those|these|the course|the same one)\b"
+    r"|它|牠|她|(?<!其)他|佢|這|这|此|該|该|嗰個|那個|那个|呢個|呢門|呢科|呢堂",
     re.IGNORECASE,
 )
+# Questions about a course attribute, even with no pronoun ("And the credits?", "多少學分?")
+ATTRIBUTES = re.compile(
+    r"credit|prerequisite|assess|level|description|outcome"
+    r"|學分|学分|先修|先決|先决|評核|评核|考核|要求|簡介|简介|內容|内容|程度",
+    re.IGNORECASE,
+)
+# Questions that search for courses, so they are NOT about the previous course
+SEARCHING = re.compile(
+    r"\b(which|what courses|any|all|list|recommend|show me)\b"
+    r"|哪|咩|邊|什麼|什么|有冇|有沒有|有没有|推薦|推荐|所有",
+    re.IGNORECASE,
+)
+
+def is_followup(question: str) -> bool:
+    if PRONOUNS.search(question):
+        return True
+    return (len(question) <= 40 and bool(ATTRIBUTES.search(question))
+            and not SEARCHING.search(question))
+
+def language_note(question: str) -> str:
+    if re.search(r"[\u4e00-\u9fff]", question):
+        return "(Reply in Chinese, using the same script, Traditional or Simplified, as the question.)"
+    return "(Reply in English.)"
 
 def codes_from_history(history: list[dict], max_back: int = 8) -> list[str]:
     """Course code(s) most recently discussed in the conversation."""
@@ -133,7 +157,7 @@ def retrieve(question: str, history: list[dict] | None = None, k: int = 3):
         r = collection.get(ids=matched)
         return _items(r["ids"], r["documents"]), "Acronym / fuzzy name match"
 
-    if history and FOLLOWUP_PATTERN.search(question):   # 3. follow-up ("How many credits is it?")
+    if history and is_followup(question):   # 3. follow-up
         ids = codes_from_history(history)
         if ids:
             r = collection.get(ids=ids)
@@ -174,7 +198,7 @@ def answer(question: str, history: list[dict]):
         "content": (
             f"Context:\n{context}\n\n"
             f"Question: {question}\n\n"
-            "(Reply in English unless the question above is written in Chinese.)"
+            f"{language_note(question)}"
         ),
     })
     resp = llm.chat.completions.create(model=MODEL, messages=messages, temperature=0.2)
