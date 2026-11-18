@@ -137,7 +137,7 @@ def codes_from_history(history: list[dict], max_back: int = 8) -> list[str]:
     for msg in reversed(recent):
         if msg["role"] == "assistant":
             ids = explicit(msg["content"])
-            if ids:
+            if ids and len(ids) <= 5:
                 return ids[:3]
     return []
 
@@ -184,8 +184,31 @@ Rules:
 5. FORMAT: Use plain text. Short "-" bullet lists and **bold** are fine.
    Do not use tables, headings or code blocks."""
 
+# "List all courses" requests (English + Chinese)
+LIST_ALL = re.compile(
+    r"\b(all|every|entire|full)\b[\w\s]{0,20}\bcourses?\b"
+    r"|\bwhat\s+courses?\s+(do you have|are there|are available|can i ask)"
+    r"|\bhow many courses\b"
+    r"|\bcourse list\b|\blist of (the )?courses\b|\blist (the )?courses\b"
+    r"|所有課程|所有课程|全部課程|全部课程|有咩課程|有哪些課程|有哪些课程|有什麼課程|有什么课程"
+    r"|課程列表|课程列表|課程清單|课程清单|有幾多個?課程|有多少個?課程|有多少门课程",
+    re.IGNORECASE,
+)
+
+def list_all_courses(question: str) -> str:
+    """Build the full course list directly from the data (no LLM, so nothing is missed)."""
+    zh = re.search(r"[\u4e00-\u9fff]", question)
+    head = f"資料庫中共有 {len(df)} 個課程：" if zh else f"There are {len(df)} courses in the database:"
+    rows = ["| 課程編號 | 課程名稱 | 學分 |" if zh else "| Code | Name | Credits |", "|---|---|---|"]
+    for _, r in df.sort_values("code").iterrows():
+        rows.append(f"| {r.code} | {r['name']} | {r.credits} |")
+    tail = "你可以問我任何一個課程的詳情。" if zh else "Ask me about any of them for details."
+    return head + "\n\n" + "\n".join(rows) + "\n\n" + tail
+
 def answer(question: str, history: list[dict]):
     items, method = retrieve(question, history)
+    if LIST_ALL.search(question):
+        return list_all_courses(question), [], "Full course list"
     if items:
         context = "\n".join(i["text"] for i in items)
     else:
