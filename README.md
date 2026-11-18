@@ -132,3 +132,9 @@ Open http://127.0.0.1:8000 in your browser. The first start is slow because the 
 - Answer quality depends on how complete the course descriptions in the CSV are.
 - The PDF-to-CSV script is written for the PolyU Subject Description Form layout. Other layouts may need adjustments.
 - There is no speech input; the chatbot is used by typing.
+
+## Licence and acknowledgments
+
+Coursework for COMP4431 at The Hong Kong Polytechnic University. Only for learning use.
+
+- Thanks to **Claude (Anthropic)** for serving as an advanced AI pair programmer, providing architectural guidance, and technical explanations throughout the development of this repository.
