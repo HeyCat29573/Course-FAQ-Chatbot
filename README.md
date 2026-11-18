@@ -23,7 +23,6 @@ A chatbot that answers questions about university courses (course code, name, de
 3. **Read Aloud (text-to-speech)**: replies are spoken using neural voices generated on the backend with `edge-tts` (not the browser's Web Speech API). The English or Chinese voice is chosen automatically. Each reply has a replay button, and a mute toggle turns auto-read off.
 4. **2D animated avatar**: an SVG avatar that blinks when idle, bobs while thinking, and opens its mouth in time with the speech. The lip-sync reads the loudness of the playing audio through the Web Audio API.
 5. **User interface**: light/dark mode (remembers your choice), suggested-question bubbles on the start screen, and follow-up question bubbles after every answer.
-6. **Data pipeline**: `build_csv.py` converts PolyU Subject Description Form PDFs into the `courses.csv` knowledge base.
 
 ## How It Works
 
@@ -123,7 +122,18 @@ Open http://127.0.0.1:8000 in your browser. The first start is slow because the 
 ## Prompt and Knowledge Base Files
 
 - **System prompt:** `SYSTEM_PROMPT` in `rag.py`
-- **Knowledge base:** `data/courses.csv` (built from the PDFs in `subject_pdfs/`)
+- **Knowledge base:** `data/courses.csv`
+
+## Technical Challenges and Solutions
+
+| Problem | Fix |
+|---|---|
+| "HCI" was not recognised as *Human-Computer Interaction* | Added auto-generated acronyms, an alias table and `rapidfuzz` name matching before semantic search |
+| `Expected IDs to be a non-empty list` when a course code is not in the data | Check codes against the known list and return "no matching course code", so the bot says it has no data |
+| Answers came back in Spanish | Explicit language rule in the system prompt, repeated next to the question |
+| Raw `**` Markdown symbols shown in replies | Safe Markdown renderer in the page (bold, lists, links, tables) plus a format rule in the prompt |
+| "How many credits is it?" returned other courses | Retrieval now uses the chat history to find the course discussed earlier |
+| Voice read out Markdown and table symbols | Strip these symbols before text-to-speech |
 
 ## Limitations
 
@@ -132,6 +142,15 @@ Open http://127.0.0.1:8000 in your browser. The first start is slow because the 
 - Answer quality depends on how complete the course descriptions in the CSV are.
 - The PDF-to-CSV script is written for the PolyU Subject Description Form layout. Other layouts may need adjustments.
 - There is no speech input; the chatbot is used by typing.
+
+## Group Members
+
+| Student ID | Name |
+|---|---|
+| 26033735d |  Chow Ho Nam  |
+| 26015586d | To Yee Chun   |
+| 26033949d | Cheng Him Ho  |
+| 26015945d | Kwok Long Hei |
 
 ## Licence and acknowledgments
 
