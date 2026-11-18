@@ -138,16 +138,16 @@ Open http://127.0.0.1:8000 in your browser. The first start is slow because the 
 ## Limitations
 
 - The chatbot only knows the courses in `data/courses.csv`. Anything outside it gets a "not available" reply.
+- Follow-up detection is rule-based (pronouns such as "it" or 他, and attribute words such as "credits" or 學分). A follow-up with neither, for example "and then?", is treated as a new question.
 - Read Aloud needs an internet connection (edge-tts).
 - Answer quality depends on how complete the course descriptions in the CSV are.
-- The PDF-to-CSV script is written for the PolyU Subject Description Form layout. Other layouts may need adjustments.
 - There is no speech input; the chatbot is used by typing.
 
 ## Group Members
 
 | Student ID | Name |
 |---|---|
-| 26033735d |  Chow Ho Nam  |
+| 26033735d | Chow Ho Nam   |
 | 26015586d | To Yee Chun   |
 | 26033949d | Cheng Him Ho  |
 | 26015945d | Kwok Long Hei |
