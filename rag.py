@@ -88,7 +88,36 @@ name_of = dict(zip(df["code"], df["name"]))
 def _items(ids, docs):
     return [{"code": i, "name": name_of.get(i, ""), "text": d} for i, d in zip(ids, docs)]
 
-def retrieve(question: str, k: int = 3):
+# Words that signal a follow-up about the course discussed earlier
+FOLLOWUP_PATTERN = re.compile(
+    r"\b(it|its|this|that|they|them|their|those|these|the course|the same one)\b|它|這|这|該|该|呢",
+    re.IGNORECASE,
+)
+
+def codes_from_history(history: list[dict], max_back: int = 8) -> list[str]:
+    """Course code(s) most recently discussed in the conversation."""
+    known = set(df["code"])
+    recent = history[-max_back:]
+
+    def explicit(text):
+        found = [c.replace(" ", "").upper() for c in CODE_PATTERN.findall(text)]
+        return [c for c in dict.fromkeys(found) if c in known]
+
+    # 1. what the user themselves asked about (code, acronym or course name)
+    for msg in reversed(recent):
+        if msg["role"] == "user":
+            ids = explicit(msg["content"]) or find_courses(msg["content"])
+            if ids:
+                return ids[:3]
+    # 2. otherwise, courses the assistant mentioned in its last answers
+    for msg in reversed(recent):
+        if msg["role"] == "assistant":
+            ids = explicit(msg["content"])
+            if ids:
+                return ids[:3]
+    return []
+
+def retrieve(question: str, history: list[dict] | None = None, k: int = 3):
     """Returns (items, method). Each item: {"code", "name", "text"}."""
     codes = [c.replace(" ", "").upper() for c in CODE_PATTERN.findall(question)]
     valid = [c for c in codes if c in set(df["code"])]
@@ -104,7 +133,13 @@ def retrieve(question: str, k: int = 3):
         r = collection.get(ids=matched)
         return _items(r["ids"], r["documents"]), "Acronym / fuzzy name match"
 
-    r = collection.query(query_texts=[question], n_results=k)   # 3. semantic search
+    if history and FOLLOWUP_PATTERN.search(question):   # 3. follow-up ("How many credits is it?")
+        ids = codes_from_history(history)
+        if ids:
+            r = collection.get(ids=ids)
+            return _items(r["ids"], r["documents"]), "Previous conversation (follow-up)"
+
+    r = collection.query(query_texts=[question], n_results=k)   # 4. semantic search
     return _items(r["ids"][0], r["documents"][0]), "Semantic search"
 
 # ---- 3. LLM via OpenRouter (OpenAI-compatible API) ----
@@ -126,7 +161,7 @@ Rules:
    Do not use tables, headings or code blocks."""
 
 def answer(question: str, history: list[dict]):
-    items, method = retrieve(question)
+    items, method = retrieve(question, history)
     if items:
         context = "\n".join(i["text"] for i in items)
     else:
