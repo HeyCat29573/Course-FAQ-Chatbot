@@ -121,7 +121,9 @@ Rules:
    and suggest checking the official course page "https://www.polyu.edu.hk/internalsearch".
 3. LANGUAGE: Reply in English by default. Only reply in Chinese if the user's
    question is written in Chinese. Never use any other language.
-4. Be concise."""
+4. Be concise.
+5. FORMAT: Use plain text. Short "-" bullet lists and **bold** are fine.
+   Do not use tables, headings or code blocks."""
 
 def answer(question: str, history: list[dict]):
     items, method = retrieve(question)

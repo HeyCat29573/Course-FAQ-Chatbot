@@ -82,6 +82,16 @@
     .src { display:inline-block; margin:2px 4px 2px 0; padding:2px 8px; border-radius:999px;
            background:var(--chip); color:var(--chip-text); border:1px solid var(--chip-border); }
     .method { margin-top:2px; }
+
+    /* Rendered markdown inside bot replies */
+    .bot .text { white-space:normal; }
+    .text .p { margin:2px 0; }
+    .text .gap { height:6px; }
+    .text .li { display:flex; gap:6px; margin:2px 0; }
+    .text .mark { flex:none; }
+    .text a { color:var(--chip-text); word-break:break-all; }
+    .text code { background:var(--border); padding:1px 5px; border-radius:4px; font-size:.92em; }
+    .msg.bot .replay { margin-top:4px; padding-left:0; }
   </style>
 </head>
 <body>
@@ -238,9 +248,10 @@ input.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
 function addMsg(text, who) {
   const div = document.createElement("div");
   div.className = "msg " + who;
-  const span = document.createElement("span");
-  span.textContent = text;
-  div.appendChild(span);
+  const body = document.createElement("div");
+  body.className = "text";
+  body.textContent = text;
+  div.appendChild(body);
   chat.appendChild(div);
   chat.scrollTop = chat.scrollHeight;
   return div;
@@ -270,8 +281,74 @@ function addSources(div, sources, method) {
   div.appendChild(box);
 }
 
+/* ---------- Markdown rendering (safe: builds DOM nodes, never uses innerHTML) ---------- */
+function renderInline(parent, text) {
+  const re = /(\*\*[^*]+\*\*|`[^`]+`|https?:\/\/\S+)/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const tok = m[0];
+    if (tok.startsWith("**")) {
+      const el = document.createElement("strong");
+      el.textContent = tok.slice(2, -2);
+      parent.appendChild(el);
+    } else if (tok.startsWith("`")) {
+      const el = document.createElement("code");
+      el.textContent = tok.slice(1, -1);
+      parent.appendChild(el);
+    } else {
+      const trail = (tok.match(/[.,;:!?)\]]+$/) || [""])[0];   // keep sentence punctuation out of the link
+      const url = tok.slice(0, tok.length - trail.length);
+      const a = document.createElement("a");
+      a.href = url; a.textContent = url; a.target = "_blank"; a.rel = "noopener noreferrer";
+      parent.appendChild(a);
+      if (trail) parent.appendChild(document.createTextNode(trail));
+    }
+    last = m.index + tok.length;
+  }
+  if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+}
+
+function renderMarkdown(container, text) {
+  container.textContent = "";
+  text.split("\n").forEach(raw => {
+    const line = raw.replace(/\s+$/, "");
+    if (!line.trim()) {                                          // blank line = small gap
+      if (container.lastChild && container.lastChild.className !== "gap") {
+        const gap = document.createElement("div");
+        gap.className = "gap";
+        container.appendChild(gap);
+      }
+      return;
+    }
+    const row = document.createElement("div");
+    const li = line.match(/^(\s*)([-*•]|\d+[.)])\s+(.*)$/);      // "- item", "* item", "1. item"
+    const h = line.match(/^\s*#{1,6}\s+(.*)$/);                  // "### heading"
+    if (li) {
+      row.className = "li";
+      row.style.marginLeft = Math.min(li[1].length, 8) * 8 + "px";   // indentation = nesting
+      const mark = document.createElement("span");
+      mark.className = "mark";
+      mark.textContent = /\d/.test(li[2]) ? li[2] : "•";
+      const body = document.createElement("span");
+      renderInline(body, li[3]);
+      row.appendChild(mark);
+      row.appendChild(body);
+    } else if (h) {
+      row.className = "p";
+      const strong = document.createElement("strong");
+      renderInline(strong, h[1]);
+      row.appendChild(strong);
+    } else {
+      row.className = "p";
+      renderInline(row, line.trim());
+    }
+    container.appendChild(row);
+  });
+}
+
 function setBotText(div, text, withReplay = true, sources = [], method = "") {
-  div.querySelector("span").textContent = text;
+  renderMarkdown(div.querySelector(".text"), text);
   if (withReplay) {
     const btn = document.createElement("button");
     btn.className = "replay";
